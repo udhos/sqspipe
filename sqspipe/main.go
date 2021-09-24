@@ -12,8 +12,10 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 )
 
 const (
@@ -22,9 +24,8 @@ const (
 )
 
 type clientConfig struct {
-	awsConfig aws.Config
-	sqs       *sqs.Client
-	queueURL  string
+	sqs      *sqs.Client
+	queueURL string
 }
 
 type appConfig struct {
@@ -56,15 +57,20 @@ func main() {
 		interval:        500 * time.Millisecond,
 	}
 
-	app.src = initClient(requireEnv("QUEUE_URL_SRC"))
-	app.dst = initClient(requireEnv("QUEUE_URL_DST"))
+	app.src = initClient(requireEnv("QUEUE_URL_SRC"), getEnv("ROLE_ARN_SRC"))
+	app.dst = initClient(requireEnv("QUEUE_URL_DST"), getEnv("ROLE_ARN_DST"))
 
 	run(app)
 }
 
-func requireEnv(name string) string {
+func getEnv(name string) string {
 	value := os.Getenv(name)
 	log.Printf("%s=[%s]", name, value)
+	return value
+}
+
+func requireEnv(name string) string {
+	value := getEnv(name)
 	if value == "" {
 		log.Fatalf("requireEnv: please set env var: %s\n", name)
 		os.Exit(1)
@@ -74,7 +80,7 @@ func requireEnv(name string) string {
 	return value
 }
 
-func initClient(queueURL string) clientConfig {
+func initClient(queueURL, roleArn string) clientConfig {
 
 	var c clientConfig
 
@@ -92,10 +98,29 @@ func initClient(queueURL string) clientConfig {
 		return c
 	}
 
+	if roleArn != "" {
+		clientSts := sts.NewFromConfig(cfg)
+		cfg2, errConfig2 := config.LoadDefaultConfig(
+			context.TODO(), config.WithRegion(region),
+			config.WithCredentialsProvider(aws.NewCredentialsCache(
+				stscreds.NewAssumeRoleProvider(
+					clientSts,
+					roleArn,
+				)),
+			),
+		)
+		if errConfig2 != nil {
+			log.Fatalf("initClient: AssumeRole %s: %v\n", roleArn, errConfig2)
+			os.Exit(1)
+			return c
+
+		}
+		cfg = cfg2
+	}
+
 	c = clientConfig{
-		awsConfig: cfg,
-		sqs:       sqs.NewFromConfig(cfg),
-		queueURL:  queueURL,
+		sqs:      sqs.NewFromConfig(cfg),
+		queueURL: queueURL,
 	}
 
 	return c
