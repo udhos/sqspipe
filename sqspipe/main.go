@@ -139,6 +139,11 @@ func reader(id int, wg *sync.WaitGroup, app appConfig) {
 	defer wg.Done()
 
 	for {
+
+		//
+		// receive from source queue
+		//
+
 		input := &sqs.ReceiveMessageInput{
 			QueueUrl: &src.queueURL,
 			AttributeNames: []types.QueueAttributeName{
@@ -164,6 +169,10 @@ func reader(id int, wg *sync.WaitGroup, app appConfig) {
 		log.Printf("%s: found %d messages", me, count)
 
 		pipeLen(me, app)
+
+		//
+		// send to limiter
+		//
 
 		for i, msg := range resp.Messages {
 			log.Printf("%s: %d/%d MessageId: %s", me, i+1, count, *msg.MessageId)
@@ -193,6 +202,11 @@ func limiter(wg *sync.WaitGroup, app appConfig) {
 	sent := 0
 
 	for {
+
+		//
+		// get message from reader
+		//
+
 		pipeLen(me, app)
 		log.Printf("%s: waiting", me)
 		m := <-app.pipeSrc
@@ -202,7 +216,7 @@ func limiter(wg *sync.WaitGroup, app appConfig) {
 
 		if elap >= interval {
 			// elap >= interval: send and restart interval
-			forward(app.pipeDst, m)
+			forward(app.pipeDst, m) // send to writer
 			begin = time.Now()
 			sent = 1
 			continue
@@ -220,7 +234,7 @@ func limiter(wg *sync.WaitGroup, app appConfig) {
 		}
 
 		// send
-		forward(app.pipeDst, m)
+		forward(app.pipeDst, m) // send to writer
 		sent++
 	}
 
@@ -242,10 +256,19 @@ func writer(id int, wg *sync.WaitGroup, app appConfig) {
 	defer wg.Done()
 
 	for {
+
+		//
+		// read from limiter
+		//
+
 		pipeLen(me, app)
 		log.Printf("%s: waiting", me)
 		m := <-app.pipeDst
 		log.Printf("%s: MessageId: %s", me, *m.MessageId)
+
+		//
+		// write into destination queue
+		//
 
 		input := &sqs.SendMessageInput{
 			QueueUrl:          &app.dst.queueURL,
@@ -260,6 +283,10 @@ func writer(id int, wg *sync.WaitGroup, app appConfig) {
 			continue
 		}
 
+		//
+		// delete from source queue
+		//
+
 		inputDelete := &sqs.DeleteMessageInput{
 			QueueUrl:      &app.src.queueURL,
 			ReceiptHandle: m.ReceiptHandle,
@@ -268,7 +295,7 @@ func writer(id int, wg *sync.WaitGroup, app appConfig) {
 		_, errDelete := app.src.sqs.DeleteMessage(context.TODO(), inputDelete)
 		if errDelete != nil {
 			log.Printf("%s: MessageId: %s - DeleteMessage: %v", me, *m.MessageId, errDelete)
-			return
+			continue
 		}
 	}
 
