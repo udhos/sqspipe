@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -44,16 +45,13 @@ func main() {
 
 	log.Printf("%s version=%s runtime=%s GOOS=%s GOARCH=%s GOMAXPROCS=%d", basename, version, runtime.Version(), runtime.GOOS, runtime.GOARCH, runtime.GOMAXPROCS(0))
 
-	bufSrc := 20
-	bufDst := 20
-
 	app := appConfig{
 		waitTimeSeconds: 10, // 0..20
-		pipeSrc:         make(chan types.Message, bufSrc),
-		pipeDst:         make(chan types.Message, bufDst),
-		readers:         1,
-		writers:         3,
-		maxRate:         15, // messages per second
+		pipeSrc:         make(chan types.Message, 10),
+		pipeDst:         make(chan types.Message, 0),
+		readers:         valueFromEnv("READERS", 1),
+		writers:         valueFromEnv("WRITERS", 1),
+		maxRate:         valueFromEnv("MAX_RATE", 16), // messages per second
 		interval:        500 * time.Millisecond,
 	}
 
@@ -61,6 +59,18 @@ func main() {
 	app.dst = initClient(requireEnv("QUEUE_URL_DST"), getEnv("ROLE_ARN_DST"))
 
 	run(app)
+}
+
+func valueFromEnv(name string, defaultValue int) int {
+	if str := getEnv(name); str != "" {
+		value, errConv := strconv.Atoi(str)
+		if errConv == nil {
+			return value
+		}
+		log.Fatalf("bad %s=[%s]: %v", name, str, errConv)
+		os.Exit(1)
+	}
+	return defaultValue
 }
 
 func getEnv(name string) string {
@@ -208,7 +218,7 @@ func reader(id int, wg *sync.WaitGroup, app appConfig) {
 }
 
 func pipeLen(label string, app appConfig) {
-	log.Printf("%s: pipeSrc=%d/%d pipeDst=%d/%d", label, len(app.pipeSrc), cap(app.pipeSrc), len(app.pipeSrc), cap(app.pipeSrc))
+	log.Printf("%s: pipeSrc=%d/%d pipeDst=%d/%d", label, len(app.pipeSrc), cap(app.pipeSrc), len(app.pipeDst), cap(app.pipeDst))
 }
 
 func limiter(wg *sync.WaitGroup, app appConfig) {
