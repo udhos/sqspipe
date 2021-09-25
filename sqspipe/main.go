@@ -8,7 +8,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -47,8 +46,8 @@ func main() {
 
 	app := appConfig{
 		waitTimeSeconds: 10, // 0..20
-		pipeSrc:         make(chan types.Message, 10),
-		pipeDst:         make(chan types.Message, 0),
+		pipeSrc:         make(chan types.Message, valueFromEnv("CHANNEL_BUF_SRC", 10)),
+		pipeDst:         make(chan types.Message, valueFromEnv("CHANNEL_BUF_DST", 0)),
 		readers:         valueFromEnv("READERS", 1),
 		writers:         valueFromEnv("WRITERS", 1),
 		maxRate:         valueFromEnv("MAX_RATE", 16), // messages per second
@@ -62,14 +61,17 @@ func main() {
 }
 
 func valueFromEnv(name string, defaultValue int) int {
-	if str := getEnv(name); str != "" {
+	str := os.Getenv(name)
+	if str != "" {
 		value, errConv := strconv.Atoi(str)
 		if errConv == nil {
+			log.Printf("%s=[%s] using %s=%d default=%d", name, str, name, value, defaultValue)
 			return value
 		}
 		log.Fatalf("bad %s=[%s]: %v", name, str, errConv)
 		os.Exit(1)
 	}
+	log.Printf("%s=[%s] using %s=%d default=%d", name, str, name, defaultValue, defaultValue)
 	return defaultValue
 }
 
@@ -148,30 +150,25 @@ func queueRegion(queueURL string) (string, error) {
 }
 
 func run(app appConfig) {
-	wg := &sync.WaitGroup{}
 
 	log.Printf("run: readers=%d writers=%d", app.readers, app.writers)
 
-	wg.Add(app.readers + 1 + app.writers)
-
 	for i := 0; i < app.readers; i++ {
-		go reader(i, wg, app)
+		go reader(i, app)
 	}
-	go limiter(wg, app)
+	go limiter(app)
 	for i := 0; i < app.writers; i++ {
-		go writer(i, wg, app)
+		go writer(i, app)
 	}
 
-	wg.Wait()
+	<-make(chan struct{})
 }
 
-func reader(id int, wg *sync.WaitGroup, app appConfig) {
+func reader(id int, app appConfig) {
 
 	me := fmt.Sprintf("reader[%d]", id)
 
 	src := app.src
-
-	defer wg.Done()
 
 	for {
 
@@ -191,7 +188,7 @@ func reader(id int, wg *sync.WaitGroup, app appConfig) {
 			WaitTimeSeconds: app.waitTimeSeconds,
 		}
 
-		log.Printf("%s: waiting", me)
+		//log.Printf("%s: waiting", me)
 
 		resp, errRecv := src.sqs.ReceiveMessage(context.TODO(), input)
 		if errRecv != nil {
@@ -202,8 +199,6 @@ func reader(id int, wg *sync.WaitGroup, app appConfig) {
 		count := len(resp.Messages)
 
 		log.Printf("%s: found %d messages", me, count)
-
-		pipeLen(me, app)
 
 		//
 		// send to limiter
@@ -217,15 +212,9 @@ func reader(id int, wg *sync.WaitGroup, app appConfig) {
 
 }
 
-func pipeLen(label string, app appConfig) {
-	log.Printf("%s: pipeSrc=%d/%d pipeDst=%d/%d", label, len(app.pipeSrc), cap(app.pipeSrc), len(app.pipeDst), cap(app.pipeDst))
-}
-
-func limiter(wg *sync.WaitGroup, app appConfig) {
+func limiter(app appConfig) {
 
 	me := "limiter"
-
-	defer wg.Done()
 
 	maxRate := app.maxRate // messages per second
 	interval := app.interval
@@ -242,8 +231,7 @@ func limiter(wg *sync.WaitGroup, app appConfig) {
 		// get message from reader
 		//
 
-		pipeLen(me, app)
-		log.Printf("%s: waiting", me)
+		//log.Printf("%s: waiting", me)
 		m := <-app.pipeSrc
 		elap := time.Since(begin)
 
@@ -277,18 +265,15 @@ func limiter(wg *sync.WaitGroup, app appConfig) {
 
 func forward(pipe chan types.Message, m types.Message) {
 	me := "limiter"
-	log.Printf("%s: %s sending...", me, *m.MessageId)
 	pipe <- m
-	log.Printf("%s: %s sending...done ", me, *m.MessageId)
+	log.Printf("%s: dst: MessageId: %s - sent", me, *m.MessageId)
 }
 
-func writer(id int, wg *sync.WaitGroup, app appConfig) {
+func writer(id int, app appConfig) {
 
 	me := fmt.Sprintf("writer[%d]", id)
 
 	dst := app.dst
-
-	defer wg.Done()
 
 	for {
 
@@ -296,8 +281,7 @@ func writer(id int, wg *sync.WaitGroup, app appConfig) {
 		// read from limiter
 		//
 
-		pipeLen(me, app)
-		log.Printf("%s: waiting", me)
+		//log.Printf("%s: waiting", me)
 		m := <-app.pipeDst
 		log.Printf("%s: MessageId: %s", me, *m.MessageId)
 
