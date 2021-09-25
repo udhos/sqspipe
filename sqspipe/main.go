@@ -111,6 +111,7 @@ func initClient(queueURL, roleArn string) clientConfig {
 	}
 
 	if roleArn != "" {
+		log.Printf("initClient: AssumeRole: arn: %s", roleArn)
 		clientSts := sts.NewFromConfig(cfg)
 		cfg2, errConfig2 := config.LoadDefaultConfig(
 			context.TODO(), config.WithRegion(region),
