@@ -15,3 +15,7 @@ continuously move messages between aws sqs queues in a rate limited manner
     export READERS=1
     export WRITERS=1
     export MAX_RATE=16
+
+## Docker
+
+    ./docker/build.sh

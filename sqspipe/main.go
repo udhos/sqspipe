@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -40,9 +41,25 @@ type appConfig struct {
 	interval        time.Duration
 }
 
+func getVersion() string {
+	return fmt.Sprintf("%s version=%s runtime=%s GOOS=%s GOARCH=%s GOMAXPROCS=%d", basename, version, runtime.Version(), runtime.GOOS, runtime.GOARCH, runtime.GOMAXPROCS(0))
+}
+
 func main() {
 
-	log.Printf("%s version=%s runtime=%s GOOS=%s GOARCH=%s GOMAXPROCS=%d", basename, version, runtime.Version(), runtime.GOOS, runtime.GOARCH, runtime.GOMAXPROCS(0))
+	var showVersion bool
+
+	flag.BoolVar(&showVersion, "version", showVersion, "show version")
+
+	flag.Parse()
+
+	if showVersion {
+		fmt.Print(getVersion())
+		fmt.Println()
+		return
+	}
+
+	log.Printf(getVersion())
 
 	app := appConfig{
 		waitTimeSeconds: 10, // 0..20
