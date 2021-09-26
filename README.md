@@ -47,4 +47,8 @@ Build recipe:
 
     ./docker/build.sh
 
+Pull from Docker hub:
+
+    docker pull udhos/sqspipe:0.0.0
+
 Docker hub: https://hub.docker.com/r/udhos/sqspipe
