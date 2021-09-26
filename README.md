@@ -35,11 +35,13 @@ These env vars are optional.
     export ROLE_ARN_DST=arn:aws:iam::222222222222:role/sqs_producer
     export MAX_RATE=16 ;# max messages per second
 
-You can use `$ROLE_ARN_SRC` to specify a role to access the source queue, and `$ROLE_ARN_DST` to specify a role to access the destination queue.
+### Roles
 
-The role in `$ROLE_ARN_SRC` must allow actions `sqs:ReceiveMessage` and `sqs:DeleteMessage` to source queue.
+You can use `$ROLE_ARN_SRC` to specify a role to access the source queue, and `$ROLE_ARN_DST` to specify a role to access the destination queue. The role in `$ROLE_ARN_SRC` must allow actions `sqs:ReceiveMessage` and `sqs:DeleteMessage` to source queue. The role in `$ROLE_ARN_DST` must allow action `sqs:SendMessage` to destination queue.
 
-The role in `$ROLE_ARN_DST` must allow action `sqs:SendMessage` to destination queue.
+### Max Rate
+
+If `$MAX_RATE` isn't specified, it defaults to 16 messages per second.
 
 ## Docker
 
