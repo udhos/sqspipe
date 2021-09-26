@@ -6,6 +6,18 @@
 
 sqspipe continuously moves messages between aws sqs queues in a rate limited manner.
 
+## Build
+
+    git clone https://github.com/udhos/sqspipe
+    cd sqspipe
+    go install ./sqspipe
+
+## Run
+
+    export QUEUE_URL_SRC=https://sqs.us-east-1.amazonaws.com/111111111111/queue_src
+    export QUEUE_URL_DST=https://sqs.us-east-1.amazonaws.com/222222222222/queue_dst
+    sqspipe
+
 ## Mandatory Env Vars
 
 sqspipe will move messages from source queue defined in `$QUEUE_URL_SRC` to destination queue defined in `$QUEUE_URL_DST`.
@@ -31,4 +43,8 @@ The role in `$ROLE_ARN_DST` must allow action `sqs:SendMessage` to destination q
 
 ## Docker
 
+Build recipe:
+
     ./docker/build.sh
+
+Docker hub: https://hub.docker.com/r/udhos/sqspipe
