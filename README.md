@@ -1,4 +1,4 @@
-[![license](http://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/udhos/sqspipe/blob/master/LICENSE)
+[![license](http://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/udhos/sqspipe/blob/main/LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/udhos/sqspipe)](https://goreportcard.com/report/github.com/udhos/sqspipe)
 [![Go Reference](https://pkg.go.dev/badge/github.com/udhos/sqspipe.svg)](https://pkg.go.dev/github.com/udhos/sqspipe)
 
