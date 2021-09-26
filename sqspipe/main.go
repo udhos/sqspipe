@@ -59,7 +59,7 @@ func main() {
 		return
 	}
 
-	log.Printf(getVersion())
+	log.Print(getVersion())
 
 	app := appConfig{
 		waitTimeSeconds: 10, // 0..20
