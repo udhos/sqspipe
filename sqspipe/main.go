@@ -63,7 +63,7 @@ func main() {
 
 	app := appConfig{
 		waitTimeSeconds: 20, // 0..20
-		pipeSrc:         make(chan types.Message, valueFromEnv("CHANNEL_BUF_SRC", 0)),
+		pipeSrc:         make(chan types.Message, valueFromEnv("CHANNEL_BUF_SRC", 10)),
 		pipeDst:         make(chan types.Message, valueFromEnv("CHANNEL_BUF_DST", 0)),
 		readers:         valueFromEnv("READERS", 1),
 		writers:         valueFromEnv("WRITERS", 1),
@@ -207,7 +207,7 @@ func reader(id int, app appConfig) {
 
 	log.Printf("%s: ready", me)
 
-	var readOk, readError int
+	var readMessage, readOk, readEmpty, readError int
 
 	for {
 
@@ -215,7 +215,7 @@ func reader(id int, app appConfig) {
 		// receive from source queue
 		//
 
-		log.Printf("%s: readOk=%d readErrors=%d channelSrc=%d channelDst=%d", me, readOk, readError, len(app.pipeSrc), len(app.pipeDst))
+		log.Printf("%s: readMessage=%d readOk=%d readEmpty=%d readError=%d channelSrc=%d channelDst=%d", me, readMessage, readOk, readEmpty, readError, len(app.pipeSrc), len(app.pipeDst))
 
 		input := &sqs.ReceiveMessageInput{
 			QueueUrl: &src.queueURL,
@@ -243,6 +243,13 @@ func reader(id int, app appConfig) {
 		count := len(resp.Messages)
 
 		log.Printf("%s: found %d messages", me, count)
+
+		if count == 0 {
+			readEmpty++
+			continue
+		}
+
+		readMessage++
 
 		//
 		// send to limiter
