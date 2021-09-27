@@ -249,7 +249,7 @@ func reader(id int, app appConfig) {
 			continue
 		}
 
-		readMessage++
+		readMessage += count
 
 		//
 		// send to limiter
