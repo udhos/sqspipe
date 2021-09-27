@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	version  = "0.0.1"
+	version  = "0.1.0"
 	basename = "sqspipe"
 )
 
@@ -62,7 +62,7 @@ func main() {
 	log.Print(getVersion())
 
 	app := appConfig{
-		waitTimeSeconds: 10, // 0..20
+		waitTimeSeconds: 20, // 0..20
 		pipeSrc:         make(chan types.Message, valueFromEnv("CHANNEL_BUF_SRC", 10)),
 		pipeDst:         make(chan types.Message, valueFromEnv("CHANNEL_BUF_DST", 0)),
 		readers:         valueFromEnv("READERS", 1),
@@ -71,8 +71,8 @@ func main() {
 		interval:        500 * time.Millisecond,
 	}
 
-	app.src = initClient(requireEnv("QUEUE_URL_SRC"), getEnv("ROLE_ARN_SRC"))
-	app.dst = initClient(requireEnv("QUEUE_URL_DST"), getEnv("ROLE_ARN_DST"))
+	app.src = initClient("src", requireEnv("QUEUE_URL_SRC"), getEnv("ROLE_ARN_SRC"))
+	app.dst = initClient("dst", requireEnv("QUEUE_URL_DST"), getEnv("ROLE_ARN_DST"))
 
 	run(app)
 }
@@ -101,7 +101,7 @@ func getEnv(name string) string {
 func requireEnv(name string) string {
 	value := getEnv(name)
 	if value == "" {
-		log.Fatalf("requireEnv: please set env var: %s\n", name)
+		log.Fatalf("requireEnv: please set env var: %s", name)
 		os.Exit(1)
 		return ""
 	}
@@ -109,26 +109,29 @@ func requireEnv(name string) string {
 	return value
 }
 
-func initClient(queueURL, roleArn string) clientConfig {
+func initClient(caller, queueURL, roleArn string) clientConfig {
 
 	var c clientConfig
 
 	region, errRegion := queueRegion(queueURL)
 	if errRegion != nil {
-		log.Fatalf("initClient: %v\n", errRegion)
+		log.Fatalf("%s initClient: %v", caller, errRegion)
 		os.Exit(1)
 		return c
 	}
 
 	cfg, errConfig := config.LoadDefaultConfig(context.TODO(), config.WithRegion(region))
 	if errConfig != nil {
-		log.Fatalf("initClient: %v\n", errConfig)
+		log.Fatalf("%s initClient: %v", caller, errConfig)
 		os.Exit(1)
 		return c
 	}
 
 	if roleArn != "" {
-		log.Printf("initClient: AssumeRole: arn: %s", roleArn)
+		//
+		// AssumeRole
+		//
+		log.Printf("%s initClient: AssumeRole: arn: %s", caller, roleArn)
 		clientSts := sts.NewFromConfig(cfg)
 		cfg2, errConfig2 := config.LoadDefaultConfig(
 			context.TODO(), config.WithRegion(region),
@@ -136,16 +139,30 @@ func initClient(queueURL, roleArn string) clientConfig {
 				stscreds.NewAssumeRoleProvider(
 					clientSts,
 					roleArn,
+					func(o *stscreds.AssumeRoleOptions) {
+						o.RoleSessionName = basename
+					},
 				)),
 			),
 		)
 		if errConfig2 != nil {
-			log.Fatalf("initClient: AssumeRole %s: %v\n", roleArn, errConfig2)
+			log.Fatalf("%s initClient: AssumeRole %s: %v", caller, roleArn, errConfig2)
 			os.Exit(1)
 			return c
 
 		}
 		cfg = cfg2
+	}
+
+	{
+		// show caller identity
+		clientSts := sts.NewFromConfig(cfg)
+		input := sts.GetCallerIdentityInput{}
+		respSts, errSts := clientSts.GetCallerIdentity(context.TODO(), &input)
+		if errSts != nil {
+			log.Printf("%s initClient: GetCallerIdentity: %v", caller, errSts)
+		}
+		log.Printf("%s initClient: GetCallerIdentity: Account=%s ARN=%s UserId=%s", caller, *respSts.Account, *respSts.Arn, *respSts.UserId)
 	}
 
 	c = clientConfig{
@@ -187,6 +204,8 @@ func reader(id int, app appConfig) {
 	me := fmt.Sprintf("reader[%d]", id)
 
 	src := app.src
+
+	log.Printf("%s: ready", me)
 
 	for {
 
@@ -238,7 +257,7 @@ func limiter(app appConfig) {
 	interval := app.interval
 	intervalQuota := int(time.Duration(maxRate) * interval / time.Second)
 
-	log.Printf("limiter: rate=%v/sec interval=%v quota=%v/interval", maxRate, interval, intervalQuota)
+	log.Printf("limiter: ready - rate=%v/sec interval=%v quota=%v/interval", maxRate, interval, intervalQuota)
 
 	begin := time.Now()
 	sent := 0
@@ -292,6 +311,8 @@ func writer(id int, app appConfig) {
 	me := fmt.Sprintf("writer[%d]", id)
 
 	dst := app.dst
+
+	log.Printf("%s: ready", me)
 
 	for {
 
