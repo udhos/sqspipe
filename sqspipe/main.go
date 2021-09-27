@@ -242,7 +242,7 @@ func reader(id int, app appConfig) {
 
 		count := len(resp.Messages)
 
-		log.Printf("%s: found %d messages", me, count)
+		log.Printf("%s: readMessage=%d + found %d messages = readMessage=%d", me, readMessage, count, readMessage+count)
 
 		if count == 0 {
 			readEmpty++
