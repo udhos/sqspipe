@@ -63,7 +63,7 @@ func main() {
 
 	app := appConfig{
 		waitTimeSeconds: 20, // 0..20
-		pipeSrc:         make(chan types.Message, valueFromEnv("CHANNEL_BUF_SRC", 10)),
+		pipeSrc:         make(chan types.Message, valueFromEnv("CHANNEL_BUF_SRC", 0)),
 		pipeDst:         make(chan types.Message, valueFromEnv("CHANNEL_BUF_DST", 0)),
 		readers:         valueFromEnv("READERS", 1),
 		writers:         valueFromEnv("WRITERS", 1),
@@ -215,7 +215,7 @@ func reader(id int, app appConfig) {
 		// receive from source queue
 		//
 
-		log.Printf("%s: readOk=%d readErrors=%d", me, readOk, readError)
+		log.Printf("%s: readOk=%d readErrors=%d channelSrc=%d channelDst=%d", me, readOk, readError, len(app.pipeSrc), len(app.pipeDst))
 
 		input := &sqs.ReceiveMessageInput{
 			QueueUrl: &src.queueURL,
@@ -277,7 +277,7 @@ func limiter(app appConfig) {
 		// get message from reader
 		//
 
-		log.Printf("%s: forwarded=%d", me, forwarded)
+		log.Printf("%s: forwarded=%d channelSrc=%d channelDst=%d", me, forwarded, len(app.pipeSrc), len(app.pipeDst))
 
 		m := <-app.pipeSrc
 		elap := time.Since(begin)
@@ -334,7 +334,7 @@ func writer(id int, app appConfig) {
 		// read from limiter
 		//
 
-		log.Printf("%s: writeOk=%d writeError=%d", me, writeOk, writeError)
+		log.Printf("%s: writeOk=%d writeError=%d channelSrc=%d channelDst=%d", me, writeOk, writeError, len(app.pipeSrc), len(app.pipeDst))
 
 		m := <-app.pipeDst
 		log.Printf("%s: MessageId: %s", me, *m.MessageId)
