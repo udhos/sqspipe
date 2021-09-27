@@ -85,7 +85,7 @@ func valueFromEnv(name string, defaultValue int) int {
 			log.Printf("%s=[%s] using %s=%d default=%d", name, str, name, value, defaultValue)
 			return value
 		}
-		log.Fatalf("bad %s=[%s]: %v", name, str, errConv)
+		log.Fatalf("bad %s=[%s]: error: %v", name, str, errConv)
 		os.Exit(1)
 	}
 	log.Printf("%s=[%s] using %s=%d default=%d", name, str, name, defaultValue, defaultValue)
@@ -101,7 +101,7 @@ func getEnv(name string) string {
 func requireEnv(name string) string {
 	value := getEnv(name)
 	if value == "" {
-		log.Fatalf("requireEnv: please set env var: %s", name)
+		log.Fatalf("requireEnv: error: please set env var: %s", name)
 		os.Exit(1)
 		return ""
 	}
@@ -115,14 +115,14 @@ func initClient(caller, queueURL, roleArn string) clientConfig {
 
 	region, errRegion := queueRegion(queueURL)
 	if errRegion != nil {
-		log.Fatalf("%s initClient: %v", caller, errRegion)
+		log.Fatalf("%s initClient: error: %v", caller, errRegion)
 		os.Exit(1)
 		return c
 	}
 
 	cfg, errConfig := config.LoadDefaultConfig(context.TODO(), config.WithRegion(region))
 	if errConfig != nil {
-		log.Fatalf("%s initClient: %v", caller, errConfig)
+		log.Fatalf("%s initClient: error: %v", caller, errConfig)
 		os.Exit(1)
 		return c
 	}
@@ -146,7 +146,7 @@ func initClient(caller, queueURL, roleArn string) clientConfig {
 			),
 		)
 		if errConfig2 != nil {
-			log.Fatalf("%s initClient: AssumeRole %s: %v", caller, roleArn, errConfig2)
+			log.Fatalf("%s initClient: AssumeRole %s: error: %v", caller, roleArn, errConfig2)
 			os.Exit(1)
 			return c
 
@@ -160,7 +160,7 @@ func initClient(caller, queueURL, roleArn string) clientConfig {
 		input := sts.GetCallerIdentityInput{}
 		respSts, errSts := clientSts.GetCallerIdentity(context.TODO(), &input)
 		if errSts != nil {
-			log.Printf("%s initClient: GetCallerIdentity: %v", caller, errSts)
+			log.Printf("%s initClient: GetCallerIdentity: error: %v", caller, errSts)
 		}
 		log.Printf("%s initClient: GetCallerIdentity: Account=%s ARN=%s UserId=%s", caller, *respSts.Account, *respSts.Arn, *respSts.UserId)
 	}
@@ -207,11 +207,15 @@ func reader(id int, app appConfig) {
 
 	log.Printf("%s: ready", me)
 
+	var readOk, readError int
+
 	for {
 
 		//
 		// receive from source queue
 		//
+
+		log.Printf("%s: readOk=%d readErrors=%d", me, readOk, readError)
 
 		input := &sqs.ReceiveMessageInput{
 			QueueUrl: &src.queueURL,
@@ -229,9 +233,12 @@ func reader(id int, app appConfig) {
 
 		resp, errRecv := src.sqs.ReceiveMessage(context.TODO(), input)
 		if errRecv != nil {
-			log.Printf("%s: ReceiveMessage: %v", me, errRecv)
+			readError++
+			log.Printf("%s: ReceiveMessage: error: %v", me, errRecv)
 			continue
 		}
+
+		readOk++
 
 		count := len(resp.Messages)
 
@@ -259,6 +266,8 @@ func limiter(app appConfig) {
 
 	log.Printf("limiter: ready - rate=%v/sec interval=%v quota=%v/interval", maxRate, interval, intervalQuota)
 
+	var forwarded int
+
 	begin := time.Now()
 	sent := 0
 
@@ -268,7 +277,8 @@ func limiter(app appConfig) {
 		// get message from reader
 		//
 
-		//log.Printf("%s: waiting", me)
+		log.Printf("%s: forwarded=%d", me, forwarded)
+
 		m := <-app.pipeSrc
 		elap := time.Since(begin)
 
@@ -277,6 +287,7 @@ func limiter(app appConfig) {
 		if elap >= interval {
 			// elap >= interval: send and restart interval
 			forward(app.pipeDst, m) // send to writer
+			forwarded++
 			begin = time.Now()
 			sent = 1
 			continue
@@ -295,6 +306,7 @@ func limiter(app appConfig) {
 
 		// send
 		forward(app.pipeDst, m) // send to writer
+		forwarded++
 		sent++
 	}
 
@@ -314,13 +326,16 @@ func writer(id int, app appConfig) {
 
 	log.Printf("%s: ready", me)
 
+	var writeOk, writeError, deleteOk, deleteError int
+
 	for {
 
 		//
 		// read from limiter
 		//
 
-		//log.Printf("%s: waiting", me)
+		log.Printf("%s: writeOk=%d writeError=%d", me, writeOk, writeError)
+
 		m := <-app.pipeDst
 		log.Printf("%s: MessageId: %s", me, *m.MessageId)
 
@@ -337,9 +352,12 @@ func writer(id int, app appConfig) {
 
 		_, errSend := dst.sqs.SendMessage(context.TODO(), input)
 		if errSend != nil {
-			log.Printf("%s: MessageId: %s - SendMessage: %v", me, *m.MessageId, errSend)
+			writeError++
+			log.Printf("%s: MessageId: %s - SendMessage: error: %v", me, *m.MessageId, errSend)
 			continue
 		}
+
+		writeOk++
 
 		//
 		// delete from source queue
@@ -352,9 +370,12 @@ func writer(id int, app appConfig) {
 
 		_, errDelete := app.src.sqs.DeleteMessage(context.TODO(), inputDelete)
 		if errDelete != nil {
-			log.Printf("%s: MessageId: %s - DeleteMessage: %v", me, *m.MessageId, errDelete)
+			deleteError++
+			log.Printf("%s: MessageId: %s - DeleteMessage: error: %v", me, *m.MessageId, errDelete)
 			continue
 		}
+
+		deleteOk++
 	}
 
 }
