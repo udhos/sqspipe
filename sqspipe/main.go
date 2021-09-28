@@ -38,7 +38,7 @@ type appConfig struct {
 	readers         int
 	writers         int
 	maxRate         int // messages per second
-	interval        time.Duration
+	interval        int // milliseconds
 }
 
 func getVersion() string {
@@ -67,12 +67,26 @@ func main() {
 		pipeDst:         make(chan types.Message, valueFromEnv("CHANNEL_BUF_DST", 0)),
 		readers:         valueFromEnv("READERS", 1),
 		writers:         valueFromEnv("WRITERS", 1),
-		maxRate:         valueFromEnv("MAX_RATE", 16), // messages per second
-		interval:        500 * time.Millisecond,
+		maxRate:         valueFromEnv("MAX_RATE", 16),  // messages per second
+		interval:        valueFromEnv("INTERVAL", 500), // millisecond
+		src:             initClient("src", requireEnv("QUEUE_URL_SRC"), getEnv("ROLE_ARN_SRC")),
+		dst:             initClient("dst", requireEnv("QUEUE_URL_DST"), getEnv("ROLE_ARN_DST")),
 	}
 
-	app.src = initClient("src", requireEnv("QUEUE_URL_SRC"), getEnv("ROLE_ARN_SRC"))
-	app.dst = initClient("dst", requireEnv("QUEUE_URL_DST"), getEnv("ROLE_ARN_DST"))
+	lowestMaxRate := 1000 / app.interval
+
+	log.Printf("lowestMaxRate=%d for INTERVAL=%d", lowestMaxRate, app.interval)
+
+	if app.maxRate < lowestMaxRate {
+		log.Printf("error: MAX_RATE=%d but lowestMaxRate=%d for INTERVAL=%d", app.maxRate, lowestMaxRate, app.interval)
+		// will catch quota error below
+	}
+
+	intervalQuota := app.maxRate * app.interval / 1000
+	if intervalQuota < 1 {
+		log.Fatalf("error: intervalQuota=%d must be >= 1", intervalQuota)
+		os.Exit(1)
+	}
 
 	run(app)
 }
@@ -161,8 +175,9 @@ func initClient(caller, queueURL, roleArn string) clientConfig {
 		respSts, errSts := clientSts.GetCallerIdentity(context.TODO(), &input)
 		if errSts != nil {
 			log.Printf("%s initClient: GetCallerIdentity: error: %v", caller, errSts)
+		} else {
+			log.Printf("%s initClient: GetCallerIdentity: Account=%s ARN=%s UserId=%s", caller, *respSts.Account, *respSts.Arn, *respSts.UserId)
 		}
-		log.Printf("%s initClient: GetCallerIdentity: Account=%s ARN=%s UserId=%s", caller, *respSts.Account, *respSts.Arn, *respSts.UserId)
 	}
 
 	c = clientConfig{
@@ -268,8 +283,8 @@ func limiter(app appConfig) {
 	me := "limiter"
 
 	maxRate := app.maxRate // messages per second
-	interval := app.interval
-	intervalQuota := int(time.Duration(maxRate) * interval / time.Second)
+	interval := time.Duration(app.interval) * time.Millisecond
+	intervalQuota := maxRate * app.interval / 1000
 
 	log.Printf("limiter: ready - rate=%v/sec interval=%v quota=%v/interval", maxRate, interval, intervalQuota)
 
