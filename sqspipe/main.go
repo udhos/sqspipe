@@ -29,19 +29,21 @@ type clientConfig struct {
 }
 
 type appConfig struct {
-	src             clientConfig
-	dst             clientConfig
-	waitTimeSeconds int32
-	pipeSrc         chan types.Message
-	pipeDst         chan types.Message
-	readers         int
-	writers         int
-	maxRate         int // messages per second
-	interval        int // milliseconds
-	healthAddr      string
-	healthPath      string
-	readerHealth    []*readerHealthStat
-	writerHealth    []*writerHealthStat
+	src                clientConfig
+	dst                clientConfig
+	waitTimeSeconds    int32
+	pipeSrc            chan types.Message
+	pipeDst            chan types.Message
+	readers            int
+	writers            int
+	maxRate            int // messages per second
+	interval           int // milliseconds
+	healthAddr         string
+	healthPath         string
+	readerHealth       []*readerHealthStat
+	writerHealth       []*writerHealthStat
+	errorCooldownRead  time.Duration
+	errorCooldownWrite time.Duration
 }
 
 func getVersion() string {
@@ -65,17 +67,19 @@ func main() {
 	log.Print(getVersion())
 
 	app := appConfig{
-		waitTimeSeconds: 20, // 0..20
-		pipeSrc:         make(chan types.Message, valueFromEnv("CHANNEL_BUF_SRC", 10)),
-		pipeDst:         make(chan types.Message, valueFromEnv("CHANNEL_BUF_DST", 0)),
-		readers:         valueFromEnv("READERS", 1),
-		writers:         valueFromEnv("WRITERS", 1),
-		maxRate:         valueFromEnv("MAX_RATE", 16),  // messages per second
-		interval:        valueFromEnv("INTERVAL", 500), // millisecond
-		src:             initClient("src", requireEnv("QUEUE_URL_SRC"), getEnv("ROLE_ARN_SRC")),
-		dst:             initClient("dst", requireEnv("QUEUE_URL_DST"), getEnv("ROLE_ARN_DST")),
-		healthAddr:      stringFromEnv("HEALTH_ADDR", ":2000"),
-		healthPath:      stringFromEnv("HEALTH_PATH", "/health"),
+		waitTimeSeconds:    20, // 0..20
+		pipeSrc:            make(chan types.Message, valueFromEnv("CHANNEL_BUF_SRC", 10)),
+		pipeDst:            make(chan types.Message, valueFromEnv("CHANNEL_BUF_DST", 0)),
+		readers:            valueFromEnv("READERS", 1),
+		writers:            valueFromEnv("WRITERS", 1),
+		maxRate:            valueFromEnv("MAX_RATE", 16),  // messages per second
+		interval:           valueFromEnv("INTERVAL", 500), // millisecond
+		src:                initClient("src", requireEnv("QUEUE_URL_SRC"), getEnv("ROLE_ARN_SRC")),
+		dst:                initClient("dst", requireEnv("QUEUE_URL_DST"), getEnv("ROLE_ARN_DST")),
+		healthAddr:         stringFromEnv("HEALTH_ADDR", ":2000"),
+		healthPath:         stringFromEnv("HEALTH_PATH", "/health"),
+		errorCooldownRead:  10 * time.Second,
+		errorCooldownWrite: 10 * time.Second,
 	}
 
 	lowestMaxRate := 1000 / app.interval
@@ -227,6 +231,7 @@ func reader(id int, app appConfig) {
 		if errRecv != nil {
 			readError++
 			log.Printf("%s: ReceiveMessage: error: %v", me, errRecv)
+			time.Sleep(app.errorCooldownRead)
 			continue
 		}
 
@@ -358,6 +363,7 @@ func writer(id int, app appConfig) {
 			writeError++
 			log.Printf("%s: MessageId: %s - SendMessage: error: %v", me, *m.MessageId, errSend)
 			app.writerHealth[id].update(false)
+			time.Sleep(app.errorCooldownWrite)
 			continue
 		}
 
