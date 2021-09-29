@@ -358,13 +358,15 @@ func writer(id int, app appConfig) {
 			MessageBody:       m.Body,
 		}
 
-		_, errSend := dst.sqs.SendMessage(context.TODO(), input)
-		if errSend != nil {
+		for {
+			_, errSend := dst.sqs.SendMessage(context.TODO(), input)
+			if errSend == nil {
+				break
+			}
 			writeError++
 			log.Printf("%s: MessageId: %s - SendMessage: error: %v", me, *m.MessageId, errSend)
 			app.writerHealth[id].update(false)
 			time.Sleep(app.errorCooldownWrite)
-			continue
 		}
 
 		writeOk++
