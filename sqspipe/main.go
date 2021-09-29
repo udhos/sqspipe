@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
 
@@ -39,6 +38,9 @@ type appConfig struct {
 	writers         int
 	maxRate         int // messages per second
 	interval        int // milliseconds
+	healthAddr      string
+	healthPath      string
+	health          []*healthStat
 }
 
 func getVersion() string {
@@ -71,6 +73,8 @@ func main() {
 		interval:        valueFromEnv("INTERVAL", 500), // millisecond
 		src:             initClient("src", requireEnv("QUEUE_URL_SRC"), getEnv("ROLE_ARN_SRC")),
 		dst:             initClient("dst", requireEnv("QUEUE_URL_DST"), getEnv("ROLE_ARN_DST")),
+		healthAddr:      stringFromEnv("HEALTH_ADDR", ":2000"),
+		healthPath:      stringFromEnv("HEALTH_PATH", "/health"),
 	}
 
 	lowestMaxRate := 1000 / app.interval
@@ -89,38 +93,6 @@ func main() {
 	}
 
 	run(app)
-}
-
-func valueFromEnv(name string, defaultValue int) int {
-	str := os.Getenv(name)
-	if str != "" {
-		value, errConv := strconv.Atoi(str)
-		if errConv == nil {
-			log.Printf("%s=[%s] using %s=%d default=%d", name, str, name, value, defaultValue)
-			return value
-		}
-		log.Fatalf("bad %s=[%s]: error: %v", name, str, errConv)
-		os.Exit(1)
-	}
-	log.Printf("%s=[%s] using %s=%d default=%d", name, str, name, defaultValue, defaultValue)
-	return defaultValue
-}
-
-func getEnv(name string) string {
-	value := os.Getenv(name)
-	log.Printf("%s=[%s]", name, value)
-	return value
-}
-
-func requireEnv(name string) string {
-	value := getEnv(name)
-	if value == "" {
-		log.Fatalf("requireEnv: error: please set env var: %s", name)
-		os.Exit(1)
-		return ""
-	}
-
-	return value
 }
 
 func initClient(caller, queueURL, roleArn string) clientConfig {
@@ -204,6 +176,7 @@ func run(app appConfig) {
 	log.Printf("run: readers=%d writers=%d", app.readers, app.writers)
 
 	for i := 0; i < app.readers; i++ {
+		app.health = append(app.health, &healthStat{id: i})
 		go reader(i, app)
 	}
 	go limiter(app)
@@ -211,7 +184,9 @@ func run(app appConfig) {
 		go writer(i, app)
 	}
 
-	<-make(chan struct{})
+	done := startHealthEndpoint(app)
+
+	<-done
 }
 
 func reader(id int, app appConfig) {
@@ -254,6 +229,7 @@ func reader(id int, app appConfig) {
 		}
 
 		readOk++
+		app.health[id].update()
 
 		count := len(resp.Messages)
 
