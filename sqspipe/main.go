@@ -40,7 +40,8 @@ type appConfig struct {
 	interval        int // milliseconds
 	healthAddr      string
 	healthPath      string
-	health          []*healthStat
+	readerHealth    []*readerHealthStat
+	writerHealth    []*writerHealthStat
 }
 
 func getVersion() string {
@@ -176,11 +177,12 @@ func run(app appConfig) {
 	log.Printf("run: readers=%d writers=%d", app.readers, app.writers)
 
 	for i := 0; i < app.readers; i++ {
-		app.health = append(app.health, &healthStat{id: i})
+		app.readerHealth = append(app.readerHealth, &readerHealthStat{id: i})
 		go reader(i, app)
 	}
 	go limiter(app)
 	for i := 0; i < app.writers; i++ {
+		app.writerHealth = append(app.writerHealth, &writerHealthStat{id: i})
 		go writer(i, app)
 	}
 
@@ -229,7 +231,7 @@ func reader(id int, app appConfig) {
 		}
 
 		readOk++
-		app.health[id].update()
+		app.readerHealth[id].update()
 
 		count := len(resp.Messages)
 
@@ -326,6 +328,9 @@ func writer(id int, app appConfig) {
 
 	var writeOk, writeError, deleteOk, deleteError int
 
+	// initialize as healthy since it might take a long time before we get an actual message to deliver
+	app.writerHealth[id].update(true)
+
 	for {
 
 		//
@@ -352,6 +357,7 @@ func writer(id int, app appConfig) {
 		if errSend != nil {
 			writeError++
 			log.Printf("%s: MessageId: %s - SendMessage: error: %v", me, *m.MessageId, errSend)
+			app.writerHealth[id].update(false)
 			continue
 		}
 
@@ -370,10 +376,12 @@ func writer(id int, app appConfig) {
 		if errDelete != nil {
 			deleteError++
 			log.Printf("%s: MessageId: %s - DeleteMessage: error: %v", me, *m.MessageId, errDelete)
+			app.writerHealth[id].update(false)
 			continue
 		}
 
 		deleteOk++
+		app.writerHealth[id].update(true)
 	}
 
 }
