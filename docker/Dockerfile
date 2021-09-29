@@ -12,6 +12,8 @@ RUN rm -r /tmp/sqspipe/.git
 RUN find /tmp/sqspipe
 WORKDIR /tmp/sqspipe
 RUN CGO_ENABLED=0 go build -o /bin/sqspipe ./sqspipe
+RUN apk add file
+RUN file /bin/sqspipe
 RUN ls /bin/sqspipe
 
 #
