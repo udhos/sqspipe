@@ -26,7 +26,10 @@ func (h *healthStat) get() bool {
 	last := h.last
 	h.lock.RUnlock()
 	elap := time.Since(last)
-	healthy := elap < 35*time.Second
+
+	// sqs listener will update status at every 20 seconds at most
+	healthy := elap < 25*time.Second
+
 	log.Printf("healthStat[%d] get: elap=%v healthy=%v", h.id, elap, healthy)
 	return healthy
 }
