@@ -44,6 +44,9 @@ type appConfig struct {
 	writerHealth       []*writerHealthStat
 	errorCooldownRead  time.Duration
 	errorCooldownWrite time.Duration
+	metrics            *metrics
+	metricsAddr        string
+	metricsPath        string
 }
 
 func getVersion() string {
@@ -80,6 +83,9 @@ func main() {
 		healthPath:         stringFromEnv("HEALTH_PATH", "/health"),
 		errorCooldownRead:  10 * time.Second,
 		errorCooldownWrite: 10 * time.Second,
+		metrics:            newMetrics(),
+		metricsAddr:        stringFromEnv("METRICS_ADDR", ":3000"),
+		metricsPath:        stringFromEnv("METRICS_PATH", "/metrics"),
 	}
 
 	lowestMaxRate := 1000 / app.interval
@@ -190,9 +196,11 @@ func run(app appConfig) {
 		go writer(i, app)
 	}
 
-	done := startHealthEndpoint(app)
+	go serveMetrics(app.metricsAddr, app.metricsPath)
 
-	<-done
+	startHealthEndpoint(app)
+
+	<-make(chan struct{}) // wait forever
 }
 
 func reader(id int, app appConfig) {
@@ -230,12 +238,14 @@ func reader(id int, app appConfig) {
 		resp, errRecv := src.sqs.ReceiveMessage(context.TODO(), input)
 		if errRecv != nil {
 			readError++
+			app.metrics.readError.Inc()
 			log.Printf("%s: ReceiveMessage: error: %v", me, errRecv)
 			time.Sleep(app.errorCooldownRead)
 			continue
 		}
 
 		readOk++
+		app.metrics.readOk.Inc()
 		app.readerHealth[id].update()
 
 		count := len(resp.Messages)
@@ -244,6 +254,7 @@ func reader(id int, app appConfig) {
 
 		if count == 0 {
 			readEmpty++
+			app.metrics.readEmpty.Inc()
 			continue
 		}
 
@@ -364,6 +375,7 @@ func writer(id int, app appConfig) {
 				break
 			}
 			writeError++
+			app.metrics.writeError.Inc()
 			log.Printf("%s: MessageId: %s - SendMessage: error: %v", me, *m.MessageId, errSend)
 			app.writerHealth[id].update(false)
 			time.Sleep(app.errorCooldownWrite)
@@ -383,12 +395,14 @@ func writer(id int, app appConfig) {
 		_, errDelete := app.src.sqs.DeleteMessage(context.TODO(), inputDelete)
 		if errDelete != nil {
 			deleteError++
+			app.metrics.deleteError.Inc()
 			log.Printf("%s: MessageId: %s - DeleteMessage: error: %v", me, *m.MessageId, errDelete)
 			app.writerHealth[id].update(false)
 			continue
 		}
 
 		deleteOk++
+		app.metrics.deleteOk.Inc()
 		app.writerHealth[id].update(true)
 	}
 

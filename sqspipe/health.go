@@ -55,7 +55,7 @@ func (h *writerHealthStat) get() bool {
 	return last
 }
 
-func startHealthEndpoint(app appConfig) chan struct{} {
+func startHealthEndpoint(app appConfig) {
 
 	log.Printf("startHealthEndpoint: addr=%s path=%s", app.healthAddr, app.healthPath)
 
@@ -70,9 +70,7 @@ func startHealthEndpoint(app appConfig) chan struct{} {
 		http.Error(w, "500 server failing", 500)
 	})
 
-	done := make(chan struct{})
-	go listenAndServe(done, app.healthAddr, nil)
-	return done
+	go listenAndServe(app.healthAddr, nil)
 }
 
 func scanHealth(app appConfig) bool {
@@ -91,10 +89,9 @@ func scanHealth(app appConfig) bool {
 	return true
 }
 
-func listenAndServe(done chan struct{}, addr string, handler http.Handler) {
+func listenAndServe(addr string, handler http.Handler) {
 	server := &http.Server{Addr: addr, Handler: handler}
 	log.Printf("listenAndServe: addr=%s", addr)
 	err := server.ListenAndServe()
-	log.Printf("listenAndServe: addr=%s error: %v", addr, err)
-	done <- struct{}{}
+	log.Fatalf("listenAndServe: addr=%s error: %v", addr, err)
 }
