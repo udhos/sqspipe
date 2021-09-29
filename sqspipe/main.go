@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	version  = "0.3.0"
+	version  = "0.3.1"
 	basename = "sqspipe"
 )
 
@@ -259,6 +259,7 @@ func reader(id int, app appConfig) {
 		}
 
 		readMessage += count
+		app.metrics.readMessage.Add(float64(count))
 
 		//
 		// send to limiter
@@ -382,6 +383,7 @@ func writer(id int, app appConfig) {
 		}
 
 		writeOk++
+		app.metrics.writeOk.Inc()
 
 		//
 		// delete from source queue
