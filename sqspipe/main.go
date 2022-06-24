@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	version  = "0.4.0"
+	version  = "0.5.1"
 	basename = "sqspipe"
 )
 
@@ -47,6 +47,9 @@ type appConfig struct {
 	metrics            *metrics
 	metricsAddr        string
 	metricsPath        string
+	dynamicRateStep    int // messages per second
+	dynamicRateTop     int // messages per second
+	dynamicRatePeriod  int // seconds
 }
 
 func getVersion() string {
@@ -56,8 +59,14 @@ func getVersion() string {
 func main() {
 
 	var showVersion bool
+	var metricsNamespace string
+	var metricsLabelKey string
+	var metricsLabelValue string
 
 	flag.BoolVar(&showVersion, "version", showVersion, "show version")
+	flag.StringVar(&metricsNamespace, "metricsNamespace", basename, "set metrics namespace")
+	flag.StringVar(&metricsLabelKey, "metricsLabelKey", metricsLabelKey, "set metrics label key")
+	flag.StringVar(&metricsLabelValue, "metricsLabelValue", metricsLabelValue, "set metrics label value")
 
 	flag.Parse()
 
@@ -69,13 +78,15 @@ func main() {
 
 	log.Print(getVersion())
 
+	log.Printf("metricsNamespace=[%s] metricsLabelKey=[%s] metricsLabelValue=[%s]", metricsNamespace, metricsLabelKey, metricsLabelValue)
+
 	app := appConfig{
 		waitTimeSeconds:    20, // 0..20
 		pipeSrc:            make(chan types.Message, valueFromEnv("CHANNEL_BUF_SRC", 10)),
 		pipeDst:            make(chan types.Message, valueFromEnv("CHANNEL_BUF_DST", 0)),
 		readers:            valueFromEnv("READERS", 1),
 		writers:            valueFromEnv("WRITERS", 1),
-		maxRate:            valueFromEnv("MAX_RATE", 16),  // messages per second
+		maxRate:            valueFromEnv("MAX_RATE", 8),   // messages per second
 		interval:           valueFromEnv("INTERVAL", 500), // millisecond
 		src:                initClient("src", requireEnv("QUEUE_URL_SRC"), getEnv("ROLE_ARN_SRC")),
 		dst:                initClient("dst", requireEnv("QUEUE_URL_DST"), getEnv("ROLE_ARN_DST")),
@@ -83,9 +94,12 @@ func main() {
 		healthPath:         stringFromEnv("HEALTH_PATH", "/health"),
 		errorCooldownRead:  10 * time.Second,
 		errorCooldownWrite: 10 * time.Second,
-		metrics:            newMetrics(),
+		metrics:            newMetrics(metricsNamespace, metricsLabelKey, metricsLabelValue),
 		metricsAddr:        stringFromEnv("METRICS_ADDR", ":3000"),
 		metricsPath:        stringFromEnv("METRICS_PATH", "/metrics"),
+		dynamicRateStep:    valueFromEnv("DYNAMIC_RATE_STEP", 0),    // messages per second (0=disabled 2+=enabled)
+		dynamicRateTop:     valueFromEnv("DYNAMIC_RATE_TOP", 16),    // messages per second
+		dynamicRatePeriod:  valueFromEnv("DYNAMIC_RATE_PERIOD", 60), // seconds
 	}
 
 	lowestMaxRate := 1000 / app.interval
@@ -279,11 +293,19 @@ func limiter(app appConfig) {
 
 	maxRate := app.maxRate // messages per second
 	interval := time.Duration(app.interval) * time.Millisecond
-	intervalQuota := maxRate * app.interval / 1000
+	intervalQuotaBase := maxRate * app.interval / 1000
+	currentQuota := intervalQuotaBase
 
-	log.Printf("limiter: ready - rate=%v/sec interval=%v quota=%v/interval", maxRate, interval, intervalQuota)
+	quotaStep := app.dynamicRateStep * app.interval / 1000
+	quotaMax := app.dynamicRateTop * app.interval / 1000
+	quotaPeriod := time.Duration(app.dynamicRatePeriod) * time.Second
+
+	log.Printf("limiter: ready - rate=%v/sec interval=%v quota=%v/interval", maxRate, interval, intervalQuotaBase)
 
 	var forwarded int
+
+	var enforcementBegin time.Time
+	var enforcementLast time.Time
 
 	begin := time.Now()
 	sent := 0
@@ -298,8 +320,27 @@ func limiter(app appConfig) {
 
 		m := <-app.pipeSrc
 		elap := time.Since(begin)
-
 		log.Printf("%s: src: MessageId: %s - elap=%v sent=%d", me, *m.MessageId, elap, sent)
+
+		//
+		// compute dynamic quota
+		//
+		{
+			var enforcementElap time.Duration
+			if time.Since(enforcementLast) > quotaPeriod {
+				// enforcement was paused for longer than 1 minute
+				enforcementBegin = time.Time{} // mark as no longer enforcing
+				currentQuota = intervalQuotaBase
+			} else {
+				// enforcing
+				enforcementElap = enforcementLast.Sub(enforcementBegin)
+				currentQuota = intervalQuotaBase + quotaStep*int(enforcementElap/quotaPeriod)
+				if currentQuota > quotaMax {
+					currentQuota = quotaMax
+				}
+			}
+			log.Printf("limiter: rate=%v/sec interval=%v enforce=%v quotaBase=%v quotaDynamic=%v", maxRate, interval, enforcementElap, intervalQuotaBase, currentQuota)
+		}
 
 		if elap >= interval {
 			// elap >= interval: send and restart interval
@@ -312,13 +353,22 @@ func limiter(app appConfig) {
 
 		// elap < interval: within interval
 
-		if sent >= intervalQuota {
+		if sent >= currentQuota {
 			// quota exceeded: wait and restart interval
 			hold := interval - elap
 			log.Printf("%s: hold %v", me, hold)
 			time.Sleep(hold)
 			begin = time.Now()
 			sent = 0
+
+			//
+			// start enforcing now
+			//
+			now := begin
+			if enforcementBegin.IsZero() {
+				enforcementBegin = now // start enforcing now
+			}
+			enforcementLast = now
 		}
 
 		// send
