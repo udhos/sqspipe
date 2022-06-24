@@ -2,7 +2,7 @@
 # STEP 1 build executable binary
 #
 
-FROM golang:1.17.1-alpine as builder
+FROM golang:1.18.3-alpine3.16 as builder
 #RUN apk add --no-cache git
 #RUN apk add git
 
@@ -29,7 +29,7 @@ RUN ls /bin/sqspipe
 #
 # STEP 2 build a small image from alpine
 #
-FROM alpine:3.14
+FROM alpine:3.16
 COPY --from=builder /bin/sqspipe /bin/sqspipe
 RUN adduser -D -g '' user
 USER user
