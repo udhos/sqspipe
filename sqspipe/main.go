@@ -1,3 +1,4 @@
+// This is the main package for the sqspipe utility.
 package main
 
 import (

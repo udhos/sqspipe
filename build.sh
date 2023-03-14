@@ -1,20 +1,19 @@
 #!/bin/bash
 
+go install golang.org/x/vuln/cmd/govulncheck@latest
+
+gofmt -s -w .
+
+revive ./...
+
+go mod tidy
+
+govulncheck ./...
+
+export CGO_ENABLED=1
+
+go test -race ./...
+
 export CGO_ENABLED=0
 
-build() {
-	local pkg="$1"
-
-	gofmt -s -w "$pkg"
-	go fix "$pkg"
-	go vet "$pkg"
-
-	hash golint >/dev/null && golint "$pkg"
-	hash staticcheck >/dev/null && staticcheck "$pkg"
-
-	go test -failfast "$pkg"
-
-	go install -v "$pkg"
-}
-
-build ./sqspipe
+go install ./...
